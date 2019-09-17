@@ -16,32 +16,32 @@ timing_window <- -28
 timing_window_infant <- 28
 
 ## load mom-baby info
-mpatids <- read.csv("/Lab_Share/PROMISE/nwcs619/MPATIDS.csv", row.names=1)
+mpatids <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/MPATIDS.csv", row.names=1)
 
 ## load gestational age and delivery data
-data <- read.csv("/Lab_Share/PROMISE/nwcs619/ARV_START.csv")
+data <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/ARV_START.csv")
 rownames(data) <- data$patid
 data$cpatid <- mpatids[rownames(data), "cpatid"]
 ## add country information
-tmp <- read.csv("/Lab_Share/PROMISE/nwcs619/OVERALL_STATUS.csv", row.names=1)
+tmp <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/OVERALL_STATUS.csv", row.names=1)
 data$country1 <- as.character(tmp[rownames(data), "country1"])
 ## remove Tanzania and Zimbabwe
 data <- subset(data, !(country1 %in% c("Tanzania", "Zimbabwe")))
 
 ## load aliquot data
-aliquot <- read.csv("/Lab_Share/PROMISE/nwcs619/volume_left updated 14dec18.csv")
+aliquot <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/volume_left updated 14dec18.csv")
 aliquot$drawdt2 <- as.Date(as.character(aliquot$drawdt), format="%d%b%Y")
 
 ## load hematocrit data and merge into aliquot data
-hema.infant <- read.csv("/Lab_Share/PROMISE/nwcs619/LBW0107T.csv")
-hema.mom <- read.csv("/Lab_Share/PROMISE/nwcs619/LBW0109T.csv")
+hema.infant <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/LBW0107T.csv")
+hema.mom <- read.csv("/Lab_Share/PROMISE/nwcs619/20181207/LBW0109T.csv")
 hema.infant <- subset(hema.infant, !(is.na(hemaval)))
 hema.mom <- subset(hema.mom, !(is.na(hema)))
 aliquot$matchstr <- sprintf("%s.%s", aliquot$patid, aliquot$drawdt)
 hema.infant$matchstr <- sprintf("%s.%s", hema.infant$patid, hema.infant$visitdt)
 hema.mom$matchstr <- sprintf("%s.%s", hema.mom$patid, hema.mom$visitdt)
-write.table(hema.infant, file="/Lab_Share/PROMISE/nwcs619/hema.infant.txt", sep="\t", row.names=F, col.names=T, quote=F)
-write.table(hema.mom, file="/Lab_Share/PROMISE/nwcs619/hema.mom.txt", sep="\t", row.names=F, col.names=T, quote=F)
+write.table(hema.infant, file="/Lab_Share/PROMISE/nwcs619/20181207/hema.infant.txt", sep="\t", row.names=F, col.names=T, quote=F)
+write.table(hema.mom, file="/Lab_Share/PROMISE/nwcs619/20181207/hema.mom.txt", sep="\t", row.names=F, col.names=T, quote=F)
 
 # hematocrit
 agg.infant <- aggregate(hemaval ~ matchstr, hema.infant, mean); rownames(agg.infant) <- as.character(agg.infant$matchstr)

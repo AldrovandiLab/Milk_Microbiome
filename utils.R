@@ -123,4 +123,11 @@ selectBestModel <- function(models) {
 	return(retval)
 }
 
-
+# stratified sampling from a factor vector
+sample.stratified <- function(groups, pct=0.75) {
+	retval <- sapply(levels(groups), function(strata) {
+		x <- which(groups == strata)
+		sample(x, size=ceiling(pct*length(x)))
+	})
+	unlist(retval)
+}
