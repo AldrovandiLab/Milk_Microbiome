@@ -28,6 +28,7 @@ library(tableone)
 library(abind)
 library(limma)
 library(psych)
+library(glmnet)
 
 source("/Lab_Share/fanli/code/PROMISE/utils.R")
 source("/Lab_Share/fanli/code/PROMISE/mcc.R")
@@ -466,45 +467,63 @@ for (st in c("DBS", "Plasma")) {
 	print(p)
 }
 
-
-## LASSO regression
+## LASSO regression of Group (separately by Regimen); using METABOLITE data [DBS, Plasma]
+set.seed(nrow(mapping))
 subtype <- "maternal"; mvar <- "Delivery"
 for (st in c("DBS", "Plasma")) {
-	mlevel <- "BIOCHEMICAL"
-	data <- df.metabolon[[st]][[mlevel]]
-	mapping.sel <- mapping[,c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom")]
-	colnames(mapping.sel) <- c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval")
-	rownames(mapping.sel) <- mapping.sel$patid
-	data.sel <- data[rownames(mapping.sel),] # subset to just the maternal samples
-	name_map <- data.frame(original=colnames(data.sel), valid=make.names(colnames(data.sel))); rownames(name_map) <- name_map$valid; colnames(data.sel) <- make.names(colnames(data.sel))
-	sds <- apply(data.sel, 2, sd); to_remove <- names(which(sds < quantile(sds, probs=0.05))); data.sel <- data.sel[, setdiff(colnames(data.sel), to_remove)] # remove metabolites in the lowest 5% for variance
-	df <- merge(data.sel, mapping.sel, by="row.names"); 
-	df[, mvar] <- factor(as.character(df[,mvar]), levels=rev(levels(df[,mvar]))) # reverse levels to get more intuitive contrast
-	res <- {}
-	for (metabolite in colnames(data.sel)) {
-		mod <- lm(as.formula(sprintf("%s ~ %s*Regimen", metabolite, mvar)), data=df); modelstr <- "LM"
-		emm <- emmeans(mod, as.formula(sprintf("pairwise ~ %s | Regimen", mvar)), adjust="none")
-		tmp <- as.data.frame(emm$contrasts) 
-		tmp$metabolite <- name_map[metabolite, "original"]; tmp$metadata_variable <- mvar; tmp$model <- modelstr
-		res <- rbind(res, tmp)
+	for (mlevel in "BIOCHEMICAL") {
+		data <- df.metabolon[[st]][[mlevel]]
+		mapping2 <- mapping[,c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom", "weight0week")]
+		colnames(mapping2) <- c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval", "weight0week")
+		rownames(mapping2) <- mapping2$patid
+		res.mean <- {}; res.sd <- {}
+		for (regi in levels(mapping2$Regimen)) {
+			mapping.sel <- subset(mapping2, Regimen==regi); mapping.sel$Group <- droplevels(mapping.sel$Group)
+			data.sel <- data[rownames(mapping.sel),] # subset to just the desired maternal samples from regimen
+			response <- droplevels(mapping.sel$Group); names(response) <- rownames(mapping.sel)
+			# add Country as covariates
+#			data.sel$Country <- mapping.sel[rownames(data.sel), "Country"]
+			agg.melt.stored <- melt(as.matrix(data.sel[, setdiff(colnames(data.sel), "Country")]), as.is=T); colnames(agg.melt.stored) <- c("SampleID", "metabolite", "value")
+			fit <- glmnet(x = data.sel, y = response, alpha = 1, family="binomial")
+			cvfit <- cv.glmnet(data.sel, response, family="binomial", type.measure="class")	
+			print(plot(cvfit, main=sprintf("CV fit for LASSO regression (%s %s %s %s)", regi, subtype, st, mlevel)))
+			res <- as.data.frame(as.matrix(coef(cvfit, s="lambda.min"))); colnames(res) <- c("value")
+			res <- subset(res, value != 0); res$taxa <- rownames(res)
+			res <- subset(res, taxa != "(Intercept)")
+			if (nrow(res)>0) {
+				res <- res[order(res$value, decreasing=T),]; res$taxa <- factor(res$taxa, levels=res$taxa)
+				res.mean <- rbind(res.mean, res)
+				p <- ggplot(res, aes(x=taxa, y=value)) + geom_bar(stat="identity") + theme_classic() + ggtitle(sprintf("[LASSO] %s ~ selected features (%s %s %s, lambda=%.4g)", regi, subtype, st, mlevel, cvfit$lambda.min)) + theme(plot.title=element_text(size=8), axis.text.x=element_text(size=6, angle=90, hjust=1, vjust=0.5))
+				print(p)
+				
+				# violin plots of metabolite values
+				agg.melt <- agg.melt.stored
+				agg.melt$Group <- mapping.sel[agg.melt$SampleID, "Group"]
+				agg.melt$del.gage <- mapping.sel[agg.melt$SampleID, "del.gage"]
+				agg.melt$weight0week <- mapping.sel[agg.melt$SampleID, "weight0week"]
+				agg.melt <- subset(agg.melt, metabolite %in% rownames(res))
+				agg.melt$metabolite <- factor(agg.melt$metabolite, levels=rownames(res))
+				p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap(~metabolite, scales="free", ncol=3) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+				print(p)
+				p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+				npages <- n_pages(p)
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+					print(p)
+				}
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=del.gage)) + geom_violin(aes(x=Group, y=value), inherit.aes=F) + geom_jitter(width=0.2) + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_gradient(low="red", high="black")
+					print(p)
+				}
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=weight0week)) + geom_violin(aes(x=Group, y=value), inherit.aes=F) + geom_jitter(width=0.2) + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_gradient(low="red", high="black")
+					print(p)
+				}
+			}
+			write.table(res, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/LASSO.%s.%s.%s.%s.txt", regi, subtype, mlevel, st), quote=F, sep="\t", row.names=F, col.names=T)
+		}
 	}
-	res <- res[,c("metabolite", setdiff(colnames(res), "metabolite"))]
-	res$padj <- p.adjust(res$p.value, method="fdr")
-	res <- res[order(res$p.value, decreasing=F),]
-	res$dir <- ifelse(res$padj < siglevel, ifelse(sign(res$estimate)==1, "up", "down"), "NS")
-#	res$dir2 = ifelse(res$estimate < 0, "down", "up"); tab <- table(res[,c("Regimen","dir2")])
-	write.table(res, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/emmeans_by_Regimen.%s.%s.%s.txt", subtype, st, mlevel), quote=F, sep="\t", row.names=F, col.names=T)
-	# forest plot
-	resSig <- subset(res, padj < siglevel)
-	df <- subset(res, metabolite %in% as.character(resSig$metabolite))
-	df <- df[order(df$estimate, decreasing=T),]
-	df$metabolite <- factor(as.character(df$metabolite), levels=as.character(unique(df$metabolite)))
-	lims <- max(abs(df$estimate) + abs(df$SE))*1.0
-	pd <- position_dodge(0.8)
-	p <- ggplot(df, aes(x=metabolite, y=estimate, color=dir, group=Regimen)) + geom_point(position=pd) + geom_errorbar(aes(x=metabolite, ymin=estimate-SE, max=estimate+SE), width=0.2, position=pd) + geom_text(aes(y=-lims, label=Regimen), position=pd, hjust=1, color="black", size=2) + geom_hline(yintercept=0) + theme_classic() + ggtitle(sprintf("Delivery stratified by Regimen (%s, %s, %s)", subtype, st, mlevel)) + coord_flip() + scale_color_manual(values=dircolors) + ylim(c(-lims, lims))
-	print(p)
 }
-
 
 ## randomForest classification of Group (separately by Regimen); using METABOLITE data [DBS, Plasma]
 set.seed(nrow(mapping))	
@@ -1524,7 +1543,7 @@ subtype <- "infant"; mvar <- "Delivery"
 for (st in c("DBS")) {
 	mlevel <- "BIOCHEMICAL"
 	data <- df.metabolon[[st]][[mlevel]]
-	mapping.sel <- mapping[,c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom", "InfantAgeInDaysBinned")]
+	mapping.sel <- mapping[,c("Delivery", "Regimen", "Group", "cpatid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom", "InfantAgeInDaysBinned")]
 	colnames(mapping.sel) <- c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval", "InfantAgeInDaysBinned")
 	rownames(mapping.sel) <- mapping.sel$patid
 	data.sel <- data[rownames(mapping.sel),] # subset to just the maternal samples
@@ -1547,6 +1566,66 @@ for (st in c("DBS")) {
 #	res$dir2 = ifelse(res$estimate < 0, "down", "up"); tab <- table(res[,c("Regimen","dir2")])
 	write.table(res, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/emmeans_by_RegimenCountry.%s.%s.%s.txt", subtype, st, mlevel), quote=F, sep="\t", row.names=F, col.names=T)
 }
+
+
+## LASSO regression of Group (separately by Regimen); using METABOLITE data [DBS]
+set.seed(nrow(mapping))
+subtype <- "infant"; mvar <- "Delivery"
+for (st in c("DBS")) {
+	for (mlevel in "BIOCHEMICAL") {
+		data <- df.metabolon[[st]][[mlevel]]
+		mapping2 <- mapping[,c("Delivery", "Regimen", "Group", "cpatid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID.Infant", "hemaval.infant", "weight0week")]
+		colnames(mapping2) <- c("Delivery", "Regimen", "Group", "cpatid", "del.gage", "del.dtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval", "weight0week")
+		rownames(mapping2) <- mapping2$cpatid
+		res.mean <- {}; res.sd <- {}
+		for (regi in levels(mapping2$Regimen)) {
+			mapping.sel <- subset(mapping2, Regimen==regi); mapping.sel$Group <- droplevels(mapping.sel$Group)
+			data.sel <- data[rownames(mapping.sel),] # subset to just the desired infant samples from regimen
+			response <- droplevels(mapping.sel$Group); names(response) <- rownames(mapping.sel)
+			# add Country as covariates
+#			data.sel$Country <- mapping.sel[rownames(data.sel), "Country"]
+			agg.melt.stored <- melt(as.matrix(data.sel[, setdiff(colnames(data.sel), "Country")]), as.is=T); colnames(agg.melt.stored) <- c("SampleID", "metabolite", "value")
+			fit <- glmnet(x = data.sel, y = response, alpha = 1, family="binomial")
+			cvfit <- cv.glmnet(data.sel, response, family="binomial", type.measure="class")	
+			print(plot(cvfit, main=sprintf("CV fit for LASSO regression (%s %s %s %s)", regi, subtype, st, mlevel)))
+			res <- as.data.frame(as.matrix(coef(cvfit, s="lambda.min"))); colnames(res) <- c("value")
+			res <- subset(res, value != 0); res$taxa <- rownames(res)
+			res <- subset(res, taxa != "(Intercept)")
+			if (nrow(res)>0) {
+				res <- res[order(res$value, decreasing=T),]; res$taxa <- factor(res$taxa, levels=res$taxa)
+				res.mean <- rbind(res.mean, res)
+				p <- ggplot(res, aes(x=taxa, y=value)) + geom_bar(stat="identity") + theme_classic() + ggtitle(sprintf("[LASSO] %s ~ selected features (%s %s %s, lambda=%.4g)", regi, subtype, st, mlevel, cvfit$lambda.min)) + theme(plot.title=element_text(size=8), axis.text.x=element_text(size=6, angle=90, hjust=1, vjust=0.5))
+				print(p)
+				
+				# violin plots of metabolite values
+				agg.melt <- agg.melt.stored
+				agg.melt$Group <- mapping.sel[agg.melt$SampleID, "Group"]
+				agg.melt$del.gage <- mapping.sel[agg.melt$SampleID, "del.gage"]
+				agg.melt$weight0week <- mapping.sel[agg.melt$SampleID, "weight0week"]
+				agg.melt <- subset(agg.melt, metabolite %in% rownames(res))
+				agg.melt$metabolite <- factor(agg.melt$metabolite, levels=rownames(res))
+				p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap(~metabolite, scales="free", ncol=3) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+				print(p)
+				p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+				npages <- n_pages(p)
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=Group)) + geom_violin() + geom_point() + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort)
+					print(p)
+				}
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=del.gage)) + geom_violin(aes(x=Group, y=value), inherit.aes=F) + geom_jitter(width=0.2) + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_gradient(low="red", high="black")
+					print(p)
+				}
+				for (ip in 1:npages) {
+					p <- ggplot(agg.melt, aes(x=Group, y=value, color=weight0week)) + geom_violin(aes(x=Group, y=value), inherit.aes=F) + geom_jitter(width=0.2) + facet_wrap_paginate(~metabolite, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of LASSO metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_gradient(low="red", high="black")
+					print(p)
+				}
+			}
+			write.table(res, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/LASSO.%s.%s.%s.%s.txt", regi, subtype, mlevel, st), quote=F, sep="\t", row.names=F, col.names=T)
+		}
+	}
+}
+
 
 ## randomForest classification of Group (separately by Regimen); using METABOLITE data [DBS]
 set.seed(nrow(mapping))	
