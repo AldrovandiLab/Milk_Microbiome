@@ -131,3 +131,22 @@ sample.stratified <- function(groups, pct=0.75) {
 	})
 	unlist(retval)
 }
+
+# plot pie chart of BIOCHEMICAL classes
+plot_metabolite_breakdown <- function(feature_list, metabolon_map) {
+	cols.superpathway <- brewer.pal(9, "Set1"); names(cols.superpathway) <- c("Amino Acid", "Carbohydrate", "Cofactors and Vitamins", "Energy", "Lipid", "Nucleotide", "Partially Characterized Molecules", "Peptide", "Xenobiotics")
+	df <- melt(table(metabolon_map[feature_list, "SUPER.PATHWAY"]))
+	colnames(df) <- c("Class", "count")
+	p <- ggplot(df, aes(x=factor(1), y=count, fill=Class)) + geom_bar(stat="identity", color="black", width=1) + geom_text(aes(label=count), position=position_stack(vjust=0.5)) + theme_classic() + coord_polar(theta="y") + theme(axis.ticks=element_blank(), axis.text.x=element_blank(), axis.title=element_blank(), axis.line=element_blank()) + scale_fill_manual(values=cols.superpathway)
+	p
+}
+
+
+scale_by_group <- function(vec, groups) {
+	for (gr in unique(groups)) {
+		inds <- which(groups==gr)
+		vec[inds] <- vec[inds] / median(vec[inds])
+	}
+	vec
+}
+	
