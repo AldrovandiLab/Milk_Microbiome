@@ -1,0 +1,37 @@
+metadata_variable	type	baseline	useForPERMANOVA	useForLCA	useForNB
+Delivery	factor	Term	yes		no
+Regimen	factor	zdv	no		no
+Group	factor	Term.zdv	no		no
+MaternalRegimen	factor	untreated	yes		no
+InfantRegimen	factor	untreated	yes		no
+MaternalGroup	factor	Term.untreated	no		yes
+InfantGroup	factor	Term.zdv	no		yes
+patid	character		no		no
+delgage	numeric		no		no
+deldtup	date		no		no
+cpatid	character		no		no
+Country	factor		yes		no
+Plasma.drawdt	date				
+DBS.drawdt	date				
+InfantDBS.drawdt	date				
+GestationalAgeAtCollection	numeric		yes		no
+SampleID.Mom	character				
+SampleID.Infant	character				
+hemaval.mom	numeric				
+hemaval.infant	numeric				
+StudySite	factor				
+gender	factor	Female			
+weight0week	numeric				
+weight1week	numeric				
+ap_onstgage	numeric				
+nbclass	factor				
+instn.mom	factor				
+instn.infant	factor				
+DaysFromEntryToDelivery	numeric				
+imputed.gage	numeric				
+InfantAgeInDays	numeric				
+InfantAgeInDaysBinned	factor	(-1,1]	yes		
+DaysPTDPlasma	numeric				
+DaysPTDDBS	numeric				
+DaysPTDPlasma2	factor	(14,200]			
+DaysPTDDBS2	factor	(14,200]			
