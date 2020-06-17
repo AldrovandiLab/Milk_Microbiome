@@ -38,7 +38,7 @@ cols.studysite <- brewer.pal(3, "Set1")[1:2]; names(cols.studysite) <- c("Malawi
 siglevel <- 0.05
 dircolors <- c("blue", "red", "grey"); names(dircolors) <- c("down", "up", "NS")
 
-mapping_fn <- "/Lab_Share/PROMISE/nwcs619/nwcs619_Mapping.110419.txt"
+mapping_fn <- "/Lab_Share/PROMISE/nwcs619/nwcs619_Mapping.020320.txt"
 mapping <- read.table(mapping_fn, header=T, as.is=T, sep="\t")
 #colnames(mapping) <- c("Delivery", "Regimen", "Group", "patid", "del.gage", "del.dtup", "cpatid", "Country", "Plasma.drawdt", "DBS.drawdt", "InfantDBS.drawdt", "GestationalAgeAtCollection", "SampleID.Mom", "SampleID.Infant", "hemaval.mom", "hemaval.infant", "StudySite", "gender", "weight0week", "weight1week", "ap_onstgage", "nbclass", "instn.mom", "instn.infant", "DaysFromEntryToDelivery", "imputed.gage", "InfantAgeInDays", "InfantAgeInDaysBinned")
 

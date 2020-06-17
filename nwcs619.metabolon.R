@@ -65,6 +65,7 @@ for (mvar in rownames(metadata_variables)) {
 
 ## (full) Cohort demographics and some QC data about metabolomics
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("MaternalGroup"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.MaternalGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
+write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
 	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
@@ -72,10 +73,16 @@ for (regi in c("untreated", "zdv", "PI-ART", "other")) {
 }
 
 ## remove Malawi 6 study site subjects
+mapping.full <- mapping
 mapping <- subset(mapping, !(Country == "Malawi" & StudySite == "6"))
 
+out_pdf <- sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/metabolon_analysis.%s.%s.pdf", "nwcs619", format(Sys.Date(), "%m%d%y"))
+pdf(out_pdf, width=12)
+
+
 #########################################################################################################
-### read in Metabolon data
+## combined violin plot of metabolites that separate Malawi-6 samples from Malawi-3, with stability data from Metabolon
+## read in data for n=100 dyads
 metabolite_levels <- c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")
 ## parse metabolon data and Z-transform
 df.metabolon <- list()
@@ -86,6 +93,76 @@ for (st in c("DBS", "Plasma")) {
 	df.metabolon[[st]] <- list()
 	metabolon <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/ScaledImpData.%s.txt", st), header=T, as.is=T, sep="\t", quote="", comment.char="")
 	colnames(metabolon) <- gsub("^X", "", colnames(metabolon))
+	# store for data submission to PROMISE
+	out <- metabolon
+	exclusion <- ifelse(colnames(out) %in% c(mapping.full$patid, mapping.full$cpatid), "", "Unreliable")
+	exclusion[1:5] <- ""
+	out <- rbind(exclusion, out)
+	out[2:nrow(out), which(out[1,] == "Unreliable")] <- NA
+	write.table(out, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/ScaledImputedData.for_DMC.%s.txt", st), row.names=F, col.names=T, sep="\t", quote=F)
+#	metabolon <- subset(metabolon, SUPER.PATHWAY!="") # remove uncharacterized molecules
+	metabolon_map <- rbind(metabolon_map, metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")])
+	tmp <- metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY", "COMP_ID", "PLATFORM")]
+	rownames(tmp) <- tmp$BIOCHEMICAL
+	metabolon_map_by_assay[[length(metabolon_map_by_assay)+1]] <- tmp
+	sel <- setdiff(colnames(metabolon), c(metabolite_levels, "COMP_ID", "PLATFORM"))
+	for (mlevel in metabolite_levels) {
+		tmp <- metabolon[,c(mlevel, sel)]
+		agg <- aggregate(as.formula(sprintf(". ~ %s", mlevel)), tmp, sum); rownames(agg) <- agg[,mlevel]; agg <- agg[,-1]
+		agg <- agg[, as.character(intersect(colnames(agg), c(mapping.full$patid, mapping.full$cpatid)))] # filter to just the samples in the mapping file
+		agg <- t(log(agg))
+#		agg <- apply(agg, 1, function(x) (x-mean(x))/sd(x))
+		agg <- agg[, setdiff(1:ncol(agg), which(is.na(apply(agg, 2, sd))))] # remove entries with zero variation
+		# fix metabolite names as necessary
+#		colnames(agg) <- gsub("\\*", "", colnames(agg))
+		df.metabolon[[st]][[length(df.metabolon[[st]])+1]] <- agg
+	}
+	names(df.metabolon[[st]]) <- metabolite_levels
+}
+names(df.metabolon) <- c("DBS", "Plasma")
+metabolon_map <- unique(metabolon_map); rownames(metabolon_map) <- metabolon_map$BIOCHEMICAL
+all_colors <- c(brewer.pal(9, "Set1"), brewer.pal(8, "Set3"))
+cols.superpathway <- c(all_colors[1:length(unique(metabolon_map$SUPER.PATHWAY))], "#bbbbbb"); names(cols.superpathway) <- c(unique(metabolon_map$SUPER.PATHWAY), "NOT_METABOLITE")
+names(metabolon_map_by_assay) <- c("DBS", "Plasma")
+
+
+subtype <- "maternal"
+stability_metabolites <- c("1-methylguanidine", "4-guanidinobutanoate", "N-acetylproline", "erythronate*", "glycerate", "arabonate/xylonate", "succinate", "thioproline")
+for (st in c("DBS")) {
+	for (mlevel in "BIOCHEMICAL") {
+		data <- df.metabolon[[st]][[mlevel]]
+		mapping.sel <- mapping.full[,c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom", "weight0week", "StudySite")]
+		colnames(mapping.sel) <- c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval", "weight0week", "StudySite")
+		mapping.sel <- subset(mapping.sel, Country == "Malawi")
+		rownames(mapping.sel) <- mapping.sel$patid
+		data.sel <- as.data.frame(data[rownames(mapping.sel), stability_metabolites]) # subset to just the maternal samples from Malawi
+		agg.melt <- melt(as.matrix(data.sel), as.is=T); colnames(agg.melt) <- c("SampleID", "metabolite", "value")
+		agg.melt$StudySite <- droplevels(mapping.sel[agg.melt$SampleID, "StudySite"])
+		p <- ggplot(agg.melt, aes(x=metabolite, y=value, color=StudySite)) + geom_violin(position=position_dodge(width=0.7)) + geom_point(position=position_dodge(width=0.7), size=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of stability metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_brewer(palette="Set1")
+		print(p)
+	}
+}
+
+
+#########################################################################################################
+### read in Metabolon data (n=79 dyads)
+metabolite_levels <- c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")
+## parse metabolon data and Z-transform
+df.metabolon <- list()
+metabolon_map <- data.frame()
+metabolon_map_by_assay <- list()
+metabolon_sortorder <- list()
+for (st in c("DBS", "Plasma")) {
+	df.metabolon[[st]] <- list()
+	metabolon <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/ScaledImpData.%s.txt", st), header=T, as.is=T, sep="\t", quote="", comment.char="")
+	colnames(metabolon) <- gsub("^X", "", colnames(metabolon))
+	# store for data submission to PROMISE
+	out <- metabolon
+	exclusion <- ifelse(colnames(out) %in% c(mapping$patid, mapping$cpatid), "", "Unreliable")
+	exclusion[1:5] <- ""
+	out <- rbind(exclusion, out)
+	out[2:nrow(out), which(out[1,] == "Unreliable")] <- NA
+	write.table(out, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/ScaledImputedData.for_DMC.%s.txt", st), row.names=F, col.names=T, sep="\t", quote=F)
 #	metabolon <- subset(metabolon, SUPER.PATHWAY!="") # remove uncharacterized molecules
 	metabolon_map <- rbind(metabolon_map, metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")])
 	tmp <- metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY", "COMP_ID", "PLATFORM")]
@@ -111,16 +188,19 @@ all_colors <- c(brewer.pal(9, "Set1"), brewer.pal(8, "Set3"))
 cols.superpathway <- c(all_colors[1:length(unique(metabolon_map$SUPER.PATHWAY))], "#bbbbbb"); names(cols.superpathway) <- c(unique(metabolon_map$SUPER.PATHWAY), "NOT_METABOLITE")
 names(metabolon_map_by_assay) <- c("DBS", "Plasma")
 
-out_pdf <- sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/metabolon_analysis.%s.%s.pdf", "nwcs619", format(Sys.Date(), "%m%d%y"))
-pdf(out_pdf, width=12)
 
 
 #########################################################################################################
 ### Cohort demographics and some QC data about metabolomics
-tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("MaternalGroup"), data=mapping, smd=T)
+mapping.demo <- subset(mapping, MaternalRegimen %in% c("untreated", "zdv", "PI-ART"))
+mapping.demo$MaternalGroup <- droplevels(mapping.demo$MaternalGroup)
+mapping.demo$MaternalRegimen <- droplevels(mapping.demo$MaternalRegimen)
+tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("MaternalGroup"), data=mapping.demo, smd=T)
 write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.MaternalGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 write.table(print(summary(tab1$ContTable)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_detailed.MaternalGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
-write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
+tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=mapping.demo, smd=T)
+write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
+write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping.demo, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
 	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
@@ -261,6 +341,7 @@ for (st in c("DBS", "Plasma")) {
 	mapping.sel <- mapping[,c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom")]
 	colnames(mapping.sel) <- c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval")
 	rownames(mapping.sel) <- mapping.sel$patid
+	mapping.sel <- subset(mapping.sel, MaternalRegimen %in% c("untreated", "zdv", "PI-ART"))
 	data <- data[rownames(mapping.sel),] # subset to just the maternal samples
 	
 	# PCA
@@ -280,6 +361,9 @@ for (st in c("DBS", "Plasma")) {
 		}
 		print(p)
 	}
+	p <- ggplot(df, aes(x=PC1, y=PC2, colour=MaternalRegimen, shape=Delivery, group=MaternalRegimen)) + geom_point(size=2) + theme_classic() + ggtitle(sprintf("%s %s %s PCoA (Euclidean distance)", subtype, st, mlevel)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + scale_color_brewer(palette="Set1") + stat_ellipse() + scale_shape_manual(values=c(1,3))
+	print(p)
+	
 	# PERMANOVA
 	res <- adonis2(data ~ Delivery + MaternalRegimen + Country + GestationalAgeAtCollection, data=mapping.sel, permutations=999, method='euclidean')
 	sink(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/metabolon_PERMANOVA.%s.%s.%s.txt", subtype, st, mlevel))
@@ -854,9 +938,6 @@ for (st in c("DBS", "Plasma")) {
 		}
 	}
 }
-
-
-
 
 ## randomForest classification of Group (multiclass); using METABOLITE data [DBS, Plasma]
 set.seed(nrow(mapping))	
