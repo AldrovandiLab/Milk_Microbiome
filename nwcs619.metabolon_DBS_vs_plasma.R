@@ -79,7 +79,7 @@ for (st in c("DBS", "Plasma")) {
 	metabolon <- subset(metabolon, SUPER.PATHWAY!="") # remove uncharacterized molecules
 	metabolon_map <- rbind(metabolon_map, metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")])
 	sel <- setdiff(colnames(metabolon), metabolite_levels)
-	sel <- intersect(sel, c(as.character(mapping$patid), as.character(mapping$cpatid)))
+	sel <- intersect(sel, c(as.character(mapping$patid)))
 	for (mlevel in metabolite_levels) {
 		tmp <- metabolon[,c(mlevel, sel)]
 		labels <- tmp[, mlevel]; tmp <- tmp[, setdiff(colnames(tmp), mlevel)]; ids <- colnames(tmp)
@@ -91,7 +91,8 @@ for (st in c("DBS", "Plasma")) {
 		})))
 		colnames(tmp) <- ids; tmp[, mlevel] <- labels
 		agg <- aggregate(as.formula(sprintf(". ~ %s", mlevel)), tmp, sum); rownames(agg) <- agg[,mlevel]; agg <- agg[,-1]
-		agg <- agg[, as.character(intersect(colnames(agg), c(mapping$patid, mapping$cpatid)))] # filter to just the samples in the mapping file
+#		agg <- agg[, as.character(intersect(colnames(agg), c(mapping$patid, mapping$cpatid)))] # filter to just the samples in the mapping file
+		agg <- agg[, as.character(intersect(colnames(agg), mapping$patid))] # filter to just the maternal samples in the mapping file
 #		agg <- t(agg)
 		agg <- t(log(agg))
 #		agg <- apply(agg, 1, function(x) (x-mean(x))/sd(x))
@@ -105,6 +106,38 @@ for (st in c("DBS", "Plasma")) {
 names(df.metabolon) <- c("DBS", "Plasma")
 metabolon_map <- unique(metabolon_map); rownames(metabolon_map) <- metabolon_map$BIOCHEMICAL
 cols.superpathway <- c(brewer.pal(length(unique(metabolon_map$SUPER.PATHWAY)), "Set1"), "#bbbbbb"); names(cols.superpathway) <- c(unique(metabolon_map$SUPER.PATHWAY), "NOT_METABOLITE")
+
+#######################
+## parse raw metabolon data for detection statistics
+df.metabolon.raw <- list()
+for (st in c("DBS", "Plasma")) {
+	df.metabolon.raw[[st]] <- list()
+	metabolon <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/OrigScale.%s.txt", st), header=T, as.is=T, sep="\t", quote="", comment.char="")
+	colnames(metabolon) <- gsub("^X", "", colnames(metabolon))
+	metabolon <- subset(metabolon, SUPER.PATHWAY!="") # remove uncharacterized molecules
+#	metabolon_map <- rbind(metabolon_map, metabolon[,c("BIOCHEMICAL", "SUB.PATHWAY", "SUPER.PATHWAY")])
+	sel <- setdiff(colnames(metabolon), metabolite_levels)
+	sel <- intersect(sel, c(as.character(mapping$patid)))
+	for (mlevel in c("BIOCHEMICAL")) {
+		tmp <- metabolon[,c(mlevel, sel)]
+		labels <- tmp[, mlevel]; tmp <- tmp[, setdiff(colnames(tmp), mlevel)]; ids <- colnames(tmp)
+		tmp <- as.data.frame(t(apply(tmp, 1, function(x) {
+			x <- as.numeric(gsub(",", "", x))
+			x
+		})))
+		to_remove <- which(apply(tmp, 1, function(x) all(is.na(x)))) # remove rows that are all NA (features found only in infant DBS)
+		tmp <- tmp[setdiff(rownames(tmp), to_remove),,drop=F]; labels <- labels[setdiff(1:length(labels), to_remove)]
+		colnames(tmp) <- ids; tmp[, mlevel] <- labels
+		# fix metabolite names as necessary
+#		colnames(agg) <- gsub("\\*", "", colnames(agg))
+		tmp <- tmp[, as.character(intersect(colnames(tmp), c(mapping$patid)))]
+		rownames(tmp) <- labels
+		df.metabolon.raw[[st]][[length(df.metabolon.raw[[st]])+1]] <- tmp
+	}
+	names(df.metabolon.raw[[st]]) <- c("BIOCHEMICAL")
+}
+names(df.metabolon.raw) <- c("DBS", "Plasma")
+#######################
 
 out_pdf <- sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/metabolon_analysis_DBS_vs_plasma.%s.%s.pdf", "nwcs619", format(Sys.Date(), "%m%d%y"))
 pdf(out_pdf, width=12)
@@ -225,7 +258,7 @@ print(p)
 ### QC data about metabolomics
 ## number of metabolites detected in each sample type, Venn diagrams
 mlevel <- "BIOCHEMICAL"
-qc <- {}; merged <- data.frame(BIOCHEMICAL=rownames(metabolon_map), detected.maternal_DBS=NA, detected.maternal_plasma=NA, detected.infant_DBS=NA, detected.infant_plasma=NA, median.maternal_DBS=NA, median.maternal_plasma=NA, median.infant_DBS=NA, median.infant_plasma=NA); rownames(merged) <- merged$BIOCHEMICAL
+qc <- {}; merged <- data.frame(BIOCHEMICAL=rownames(metabolon_map), detected.maternal_DBS=NA, detected.maternal_plasma=NA, median.maternal_DBS=NA, median.maternal_plasma=NA); rownames(merged) <- merged$BIOCHEMICAL
 for (st in c("DBS", "Plasma")) {
 #	metabolon <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/OrigScale.%s.txt", st), header=T, as.is=T, sep="\t", quote="", comment.char="")
 #	colnames(metabolon) <- gsub("^X", "", colnames(metabolon))
@@ -234,37 +267,40 @@ for (st in c("DBS", "Plasma")) {
 #	sel <- intersect(sel, c(as.character(mapping$patid), as.character(mapping$cpatid)))
 #	tmp <- metabolon[,sel]; rownames(tmp) <- metabolon[, mlevel]; ids <- colnames(tmp)
 #	tmp <- t(apply(tmp, 1, function(x) as.numeric(gsub(",", "", x)))); colnames(tmp) <- ids
-	tmp <- t(df.metabolon[[st]][[mlevel]])
-	# count detectable as any non-NA value
+#	tmp <- t(df.metabolon[[st]][[mlevel]])
+	tmp <- df.metabolon.raw[[st]][[mlevel]]
+#	# count detectable as any non-NA value
 	counts.maternal <- apply(tmp[, as.character(mapping$patid)], 1, function(x) length(which(!is.na(x))))
-	if (any(as.character(mapping$cpatid) %in% colnames(tmp))) {
-		counts.infant <- apply(tmp[, as.character(mapping$cpatid)], 1, function(x) length(which(!is.na(x))))
-	} else {
-		counts.infant <- rep(NA, length(counts.maternal))
-	}
-	# summary statistics
+#	if (any(as.character(mapping$cpatid) %in% colnames(tmp))) {
+#		counts.infant <- apply(tmp[, as.character(mapping$cpatid)], 1, function(x) length(which(!is.na(x))))
+#	} else {
+#		counts.infant <- rep(NA, length(counts.maternal))
+#	}
+#	# summary statistics
 	median.maternal <- apply(tmp[, as.character(mapping$patid)], 1, function(x) median(x,na.rm=T))
-	if (any(as.character(mapping$cpatid) %in% colnames(tmp))) {
-		median.infant <- apply(tmp[, as.character(mapping$cpatid)], 1, function(x) median(x,na.rm=T))
-	} else {
-		median.infant <- rep(NA, length(median.maternal))
-	}
-	out <- data.frame(BIOCHEMICAL=rownames(tmp), subtype=st, detected.maternal=counts.maternal, detected.infant=counts.infant, median.maternal=median.maternal, median.infant=median.infant)
+#	if (any(as.character(mapping$cpatid) %in% colnames(tmp))) {
+#		median.infant <- apply(tmp[, as.character(mapping$cpatid)], 1, function(x) median(x,na.rm=T))
+#	} else {
+#		median.infant <- rep(NA, length(median.maternal))
+#	}
+	out <- data.frame(BIOCHEMICAL=rownames(tmp), subtype=st, detected.maternal=counts.maternal, median.maternal=median.maternal)
 	if (st == "DBS") {
-		merged[as.character(out$BIOCHEMICAL), c("BIOCHEMICAL", "detected.maternal_DBS", "detected.infant_DBS", "median.maternal_DBS", "median.infant_DBS")] <- out[, c("BIOCHEMICAL", "detected.maternal", "detected.infant", "median.maternal", "median.infant")]
+		merged[as.character(out$BIOCHEMICAL), c("BIOCHEMICAL", "detected.maternal_DBS", "median.maternal_DBS")] <- out[, c("BIOCHEMICAL", "detected.maternal", "median.maternal")]
 	} else {
-		merged[as.character(out$BIOCHEMICAL), c("BIOCHEMICAL", "detected.maternal_plasma", "detected.infant_plasma", "median.maternal_plasma", "median.infant_plasma")] <- out[, c("BIOCHEMICAL", "detected.maternal", "detected.infant", "median.maternal", "median.infant")]
+		merged[as.character(out$BIOCHEMICAL), c("BIOCHEMICAL", "detected.maternal_plasma", "median.maternal_plasma")] <- out[, c("BIOCHEMICAL", "detected.maternal", "median.maternal")]
 	}
 	write.table(out, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/detected_counts.%s.txt", st), quote=F, sep="\t", row.names=F, col.names=T)
 }
 merged$FLAG.maternal_DBS <- ifelse(is.na(merged$detected.maternal_DBS), FALSE, merged$detected.maternal_DBS > 0)
-merged$FLAG.infant_DBS <- ifelse(is.na(merged$detected.infant_DBS), FALSE, merged$detected.infant_DBS > 0)
+#merged$FLAG.infant_DBS <- ifelse(is.na(merged$detected.infant_DBS), FALSE, merged$detected.infant_DBS > 0)
 merged$FLAG.maternal_plasma <- ifelse(is.na(merged$detected.maternal_plasma), FALSE, merged$detected.maternal_plasma > 0)
-merged$Group <- ifelse(merged$FLAG.maternal_plasma & merged$FLAG.maternal_DBS & merged$FLAG.infant_DBS, "both", ifelse(merged$FLAG.maternal_DBS & merged$FLAG.infant_DBS, "DBS", ifelse(merged$FLAG.maternal_plasma & !merged$FLAG.maternal_DBS & !merged$FLAG.infant_DBS, "Plasma", "other")))
+#merged$Group <- ifelse(merged$FLAG.maternal_plasma & merged$FLAG.maternal_DBS & merged$FLAG.infant_DBS, "both", ifelse(merged$FLAG.maternal_DBS & merged$FLAG.infant_DBS, "DBS", ifelse(merged$FLAG.maternal_plasma & !merged$FLAG.maternal_DBS & !merged$FLAG.infant_DBS, "Plasma", "other")))
+merged$Group <- ifelse(merged$FLAG.maternal_plasma & merged$FLAG.maternal_DBS, "both", ifelse(merged$FLAG.maternal_DBS, "DBS", ifelse(merged$FLAG.maternal_plasma, "Plasma", "other")))
+merged <- subset(merged, Group != "other") # remove 3 BIOCHEMICALs only found in infant DBS (shows up in metabolon_map)
 merged$SUB.PATHWAY <- metabolon_map[rownames(merged), "SUB.PATHWAY"]
 merged$SUPER.PATHWAY <- metabolon_map[rownames(merged), "SUPER.PATHWAY"]
-vc <- vennCounts(merged[, c("FLAG.maternal_DBS", "FLAG.infant_DBS", "FLAG.maternal_plasma")])
-vennDiagram(vc, cex=c(1,1,1))
+#vc <- vennCounts(merged[, c("FLAG.maternal_DBS", "FLAG.infant_DBS", "FLAG.maternal_plasma")])
+#vennDiagram(vc, cex=c(1,1,1))
 vc <- vennCounts(merged[, c("FLAG.maternal_DBS", "FLAG.maternal_plasma")])
 vennDiagram(vc, cex=c(1,1))
 write.table(merged, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/detected_counts.%s.txt", "merged"), quote=F, sep="\t", row.names=F, col.names=T)
