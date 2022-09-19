@@ -278,6 +278,7 @@ names(metabolon_map_by_assay) <- c("DBS", "Plasma")
 
 #########################################################################################################
 ### Cohort demographics and some QC data about metabolomics
+# Table 1 for n=76 (DBS)
 mapping.demo <- subset(mapping, MaternalRegimen %in% c("untreated", "zdv", "PI-ART"))
 mapping.demo$MaternalGroup <- droplevels(mapping.demo$MaternalGroup)
 mapping.demo$MaternalRegimen <- droplevels(mapping.demo$MaternalRegimen)
@@ -290,6 +291,21 @@ write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", 
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
 	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+}
+
+# Table 1 for n=97 (plasma)
+mapping.demo <- subset(mappinglist[["Plasma"]], MaternalRegimen %in% c("untreated", "zdv", "PI-ART"))
+mapping.demo$MaternalGroup <- droplevels(mapping.demo$MaternalGroup)
+mapping.demo$MaternalRegimen <- droplevels(mapping.demo$MaternalRegimen)
+tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("MaternalGroup"), data=mapping.demo, smd=T)
+write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.MaternalGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
+write.table(print(summary(tab1$ContTable)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS_detailed.MaternalGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
+tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=mapping.demo, smd=T)
+write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
+write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping.demo, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
+for (regi in c("untreated", "zdv", "PI-ART", "other")) {
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 }
 
 ### number of metabolites detected in each sample type, Venn diagrams

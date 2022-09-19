@@ -104,49 +104,68 @@ getTaxonomy <- function(otus, tax_tab, level, na_str = c("unclassified", "uniden
 }
 
 
-# select best available model from list of glmmTMB models, or return NA if none are valid
-# returns a one-element list with names as provided
-selectBestModel <- function(models) {
-	
-	valid <- lapply(models, class) != "try-error"
-	AICs <- lapply(models, function(x) {
-		ifelse(class(x)=="try-error", NA, AIC(x))
-	})
-	sel <- which.min(AICs)
-	# if there is a valid minimum AIC model, return it; otherwise return NA
-	if (length(sel)==1 & valid[sel]) {
-		retval <- models[sel]
+## modified rgcv function from 'spm' package to enable functionality of rfcv from 'randomForest'
+## do cross-validation along feature selection axis in addition to sample-wise cross-validation
+rgcv2 <- function (trainx, trainy, cv.fold = 10, scale = "log", step = 0.5, mtry = function(p) max(1, floor(sqrt(p))), num.trees = 500, min.node.size = NULL, num.threads = NULL, verbose = FALSE, recursive = FALSE, case.weights = NULL, ...) {
+	recursive.importance <- ifelse(recursive, "permutation", "none")
+	classRF <- is.factor(trainy)
+	n <- nrow(trainx)
+	p <- ncol(trainx)
+	if (scale == "log") {
+		k <- floor(log(p, base = 1/step))
+		n.var <- round(p * step^(0:(k - 1)))
+		same <- diff(n.var) == 0
+		if (any(same)) {
+		  n.var <- n.var[-which(same)]
+		}
+		if (!1 %in% n.var) { 
+		  n.var <- c(n.var, 1)
+		}
 	} else {
-		retval <- NA
+		n.var <- seq(from = p, to = 1, by = step)
 	}
-	
-	return(retval)
-}
-
-# stratified sampling from a factor vector
-sample.stratified <- function(groups, pct=0.75) {
-	retval <- sapply(levels(groups), function(strata) {
-		x <- which(groups == strata)
-		sample(x, size=ceiling(pct*length(x)))
-	})
-	unlist(retval)
-}
-
-# plot pie chart of BIOCHEMICAL classes
-plot_metabolite_breakdown <- function(feature_list, metabolon_map) {
-	cols.superpathway <- brewer.pal(9, "Set1"); names(cols.superpathway) <- c("Amino Acid", "Carbohydrate", "Cofactors and Vitamins", "Energy", "Lipid", "Nucleotide", "Partially Characterized Molecules", "Peptide", "Xenobiotics")
-	df <- melt(table(metabolon_map[feature_list, "SUPER.PATHWAY"]))
-	colnames(df) <- c("Class", "count")
-	p <- ggplot(df, aes(x=factor(1), y=count, fill=Class)) + geom_bar(stat="identity", color="black", width=1) + geom_text(aes(label=count), position=position_stack(vjust=0.5)) + theme_classic() + coord_polar(theta="y") + theme(axis.ticks=element_blank(), axis.text.x=element_blank(), axis.title=element_blank(), axis.line=element_blank()) + scale_fill_manual(values=cols.superpathway)
-	p
-}
-
-
-scale_by_group <- function(vec, groups) {
-	for (gr in unique(groups)) {
-		inds <- which(groups==gr)
-		vec[inds] <- vec[inds] / median(vec[inds])
+	k <- length(n.var)
+	cv.pred <- vector(k, mode = "list")
+	for (i in 1:k) cv.pred[[i]] <- trainy
+	if (classRF) {
+		f <- trainy
+	} else {
+		f <- cut(trainy, c(-Inf, stats::quantile(trainy, 1:4/5), Inf))
 	}
-	vec
+	nlvl <- table(f)
+	idx <- numeric(n)
+	for (i in 1:length(nlvl)) {
+		  idx[which(f == levels(f)[i])] <- sample(rep(1:cv.fold, 
+		      length = nlvl[i]))
+	}
+	for (i in 1:cv.fold) {
+		  data.dev <- trainx[idx != i, , drop = FALSE]
+		  data.pred <- trainx[idx == i, , drop = FALSE]
+		  response.dev <- trainy[idx != i]
+		  all.rf <- ranger::ranger(x = data.dev, y=response.dev, mtry = mtry(p), 
+		      num.trees = num.trees, min.node.size = min.node.size, 
+		      num.threads = num.threads, verbose = verbose, importance="permutation", case.weights=case.weights[idx != i])
+		  cv.pred[[1]][idx == i] <- stats::predict(all.rf, data = data.pred)$predictions
+		  impvar <- (1:p)[order(importance(all.rf, type = "permutation"), decreasing = TRUE)]
+		  for (j in 2:k) {
+		    imp.idx <- impvar[1:n.var[j]]
+		    data.dev.sub <- data.dev[, imp.idx, drop=F]
+		    sub.rf <- ranger::ranger(x = data.dev.sub, y=response.dev, mtry = mtry(n.var[j]), 
+		      num.trees = num.trees, min.node.size = min.node.size, 
+		      num.threads = num.threads, verbose = verbose, importance=recursive.importance, case.weights=case.weights[idx != i])
+		    cv.pred[[j]][idx == i] <- stats::predict(sub.rf, data = data.pred[, imp.idx, drop=F])$predictions
+		    if (recursive) {
+		      impvar <- (1:length(imp.idx))[order(importance(sub.rf, type = "permutation"), decreasing = TRUE)]
+		    }
+		  }
+	}
+	if (classRF) {
+		error.cv <- sapply(cv.pred, function(x) mean(trainy != x))
+	} else {
+		error.cv <- sapply(cv.pred, function(x) mean((trainy - x)^2))
+	}
+	names(error.cv) <- names(cv.pred) <- n.var
+	list(n.var = n.var, error.cv = error.cv, predicted = cv.pred)
+
 }
-	
+
