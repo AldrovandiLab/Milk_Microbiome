@@ -29,6 +29,7 @@ library(abind)
 library(limma)
 library(psych)
 library(glmnet)
+library(caret)
 
 source("/Lab_Share/fanli/code/PROMISE/utils.R")
 source("/Lab_Share/fanli/code/PROMISE/mcc.R")
@@ -41,6 +42,7 @@ cols.delivery2 <- c("#808080", "orange", "red"); names(cols.delivery2) <- c("Ter
 siglevel <- 0.05
 siglevel_loose <- 0.2 # less conservative alpha for infant DBS
 dircolors <- c("blue", "red", "grey"); names(dircolors) <- c("down", "up", "NS")
+shapes.sig <- c(19, 1); names(shapes.sig) <- c("sig", "NS")
 
 mapping_fn <- "/Lab_Share/PROMISE/nwcs619/nwcs619_Mapping.020320.txt"
 mapping <- read.table(mapping_fn, header=T, as.is=T, sep="\t")
@@ -69,8 +71,10 @@ write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", 
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	tmp <- subset(mapping, MaternalRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	#write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_full.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 }
 
 ## remove Malawi 6 study site subjects
@@ -289,8 +293,12 @@ tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstga
 write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping.demo, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	tmp <- subset(mapping, MaternalRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "Country", "delgage", "hemaval.mom", "hemaval.infant", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	tmp <- subset(mapping, InfantRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "Country", "delgage", "InfantAgeInDays", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 }
 
 # Table 1 for n=97 (plasma)
@@ -304,8 +312,12 @@ tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstga
 write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
 write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "InfantAgeInDays", "delgage", "hemaval.infant"), strata=c("InfantGroup"), data=mapping.demo, smd=T)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 for (regi in c("untreated", "zdv", "PI-ART", "other")) {
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=subset(mapping, MaternalRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
-	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "delgage", "hemaval.mom", "hemaval.infant"), strata=c("Delivery"), data=subset(mapping, InfantRegimen==regi), smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	tmp <- subset(mapping, MaternalRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "Country", "delgage", "hemaval.mom", "hemaval.infant", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.MaternalRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+	tmp <- subset(mapping, InfantRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "Country", "delgage", "hemaval.mom", "hemaval.infant", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_1_DBS.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
 }
 
 ### number of metabolites detected in each sample type, Venn diagrams
@@ -453,15 +465,16 @@ for (st in c("DBS", "Plasma")) {
 	eigs <- pca$sdev^2
 	pvar <- 100*(eigs / sum(eigs))
 	df <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2], SampleID=rownames(pca$x))
+	df$SampleID2 <- sprintf("%s******", unlist(lapply(as.character(df$SampleID), function(x) unlist(strsplit(x, ""))[1])))
 	for (mvar in intersect(rownames(subset(metadata_variables, useForPERMANOVA=="yes")), colnames(mapping.sel))) {
 		df[, mvar] <- mapping.sel[rownames(df), mvar]
 		if (metadata_variables[mvar, "type"] == "factor") {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + scale_color_brewer(palette="Set1") + stat_ellipse(type="t")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + scale_color_brewer(palette="Set1") + stat_ellipse(type="t")
 		} else if (metadata_variables[mvar, "type"] == "numeric") {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + scale_color_gradient(low="grey", high="red")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + scale_color_gradient(low="grey", high="red")
 		}
 		else {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + stat_ellipse(type="t")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s PCoA (Euclidean distance)", subtype, st, mlevel, mvar)) + xlab(sprintf("PC1 [%.1f%%]", pvar[1])) + ylab(sprintf("PC2 [%.1f%%]", pvar[2])) + stat_ellipse(type="t")
 		}
 		print(p)
 	}
@@ -476,15 +489,16 @@ for (st in c("DBS", "Plasma")) {
 	# t-SNE
 	tsne.out <- Rtsne(data, perplexity=20)
 	df <- data.frame(PC1 = tsne.out$Y[,1], PC2 = tsne.out$Y[,2], SampleID=rownames(data)); rownames(df) <- df$SampleID
+	df$SampleID2 <- sprintf("%s******", unlist(lapply(as.character(df$SampleID), function(x) unlist(strsplit(x, ""))[1])))
 	for (mvar in intersect(rownames(subset(metadata_variables, useForPERMANOVA=="yes")), colnames(mapping.sel))) {
 		df[, mvar] <- mapping.sel[rownames(df), mvar]
 		if (metadata_variables[mvar, "type"] == "factor") {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + scale_color_brewer(palette="Set1") + stat_ellipse(type="t")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + scale_color_brewer(palette="Set1") + stat_ellipse(type="t")
 		} else if (metadata_variables[mvar, "type"] == "numeric") {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + scale_color_gradient(low="grey", high="red")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + scale_color_gradient(low="grey", high="red")
 		}
 		else {
-			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + stat_ellipse(type="t")
+			p <- ggplot(df, aes_string(x="PC1", y="PC2", colour=mvar)) + geom_point() + geom_text(aes(label=SampleID2), vjust="inward", hjust="inward") + theme_classic() + ggtitle(sprintf("%s %s %s %s tSNE", subtype, st, mlevel, mvar)) + stat_ellipse(type="t")
 		}
 		print(p)
 	}
@@ -1231,7 +1245,9 @@ for (st in c("DBS", "Plasma")) {
 			cv.sd <- unlist(apply(collated.cv, 1, sd))
 			inds <- order(importance.mean, decreasing=T)
 #			inds <- inds[1:min(50, length(which(importance.mean[inds] > 0.0005)))] # edit as appropriate
-			inds <- inds[1:min(20, as.numeric(names(cv.mean)[which.min(cv.mean)]))] # select number of features based on cross-validation
+			inds <- inds[1:min(20, as.numeric(names(cv.mean)[which.min(cv.mean)]))] # minimum CVE, capped at 20 features
+#			inds <- inds[1:as.numeric(names(cv.mean)[which.min(cv.mean)])] # minimum CVE
+			inds <- inds[1:min(as.numeric(names(which(cv.mean <= min(cv.mean)+sd(cv.mean)))))] # wthin 1 SD of minimum CVE
 			write.table(melt(importance.mean[inds]), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.features.txt", regi, subtype, mlevel, st), quote=F, sep="\t", row.names=T, col.names=F)
 
 			## after running for the first time, COMMENT OUT THIS BLOCK ##
@@ -1420,6 +1436,33 @@ for (st in c("DBS", "Plasma")) {
 		}
 	}
 }
+
+## boxplots of all metabolite values
+subtype <- "maternal"
+for (st in c("DBS", "Plasma")) {
+	for (mlevel in "BIOCHEMICAL") {
+		data <- df.metabolon[[st]][[mlevel]]
+		mapping.sel <- mappinglist[[st]][,c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID.Mom", "hemaval.mom", "weight0week")]
+		colnames(mapping.sel) <- c("Delivery", "MaternalRegimen", "MaternalGroup", "patid", "delgage", "deldtup", "Country", "GestationalAgeAtCollection", "SampleID", "hemaval", "weight0week")
+		mapping.sel <- subset(mapping.sel, MaternalRegimen %in% c("untreated", "zdv", "PI-ART")) # exclude other regimen because insufficient numbers
+		rownames(mapping.sel) <- mapping.sel$patid
+		data.sel <- as.data.frame(data[rownames(mapping.sel),]) # subset to just the maternal samples
+		agg.melt <- melt(as.matrix(data.sel), as.is=T); colnames(agg.melt) <- c("SampleID", "metabolite", "value")
+		agg.melt$MaternalGroup <- droplevels(mapping.sel[agg.melt$SampleID, "MaternalGroup"])
+		agg.melt$MaternalGroup <- factor(as.character(agg.melt$MaternalGroup), levels=rev(c("Preterm.untreated", "Term.untreated", "Preterm.zdv", "Term.zdv", "Preterm.PI-ART", "Term.PI-ART")))
+		# manual pagination
+		metabolites <- unique(agg.melt$metabolite)
+		for (i in seq(from=1,to=length(metabolites), by=12)) {
+			j <- min(i+11, length(metabolites))
+			agg.melt.sel <- subset(agg.melt, metabolite %in% metabolites[i:j])
+			p <- ggplot(agg.melt.sel, aes(x=MaternalGroup, y=value, color=MaternalGroup)) + geom_boxplot(outlier.shape=NA) + geom_point(size=1) + facet_wrap(~metabolite, scales="free", ncol=3, nrow=4) + theme_classic() + ggtitle(sprintf("Rel. abund. of all metabolites (%s, %s, %s)", subtype, mlevel, st)) + coord_flip() + scale_color_manual(values=cols.cohort) + theme(strip.text = element_text(size=7))
+			print(p)
+		}
+	}
+}
+
+
+
 
 ### randomForest classification of Group (multiclass); using METABOLITE data [DBS, Plasma]
 #set.seed(nrow(mapping))	
@@ -1639,6 +1682,25 @@ for (mlevel in "BIOCHEMICAL") {
 #		write.table(collated.cv, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.cv.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=T, col.names=F)
 #		## END BLOCK TO COMMENT ##
 
+#		## playing around with caret
+#		library(doParallel)
+#		cl <- makePSOCKcluster(16)
+#		registerDoParallel(cl)
+#		
+#		fit_control <- trainControl(method = "cv", number = 10)
+#		rf_fit <- train(x=data.sel, y=response, method = "ranger", trControl=fit_control)
+#		
+#		step <- 0.9
+#		subsets <- unique(floor(ncol(data.sel)*step^(0:100)))
+#		subsets <- subsets[subsets > 0]
+#		rfe.ctrl = rfeControl(functions = rfFuncs, method = "repeatedcv", repeats=5, number=10, allowParallel = TRUE, verbose = TRUE)
+#		rfe_train <- rfe(x=data.sel, y=response, rfeControl=rfe.ctrl, sizes=subsets)
+#		p <- plot(rfe_train, type = c("g", "o"))
+#		print(p)
+#		p <- plot(rfe_train, type = c("g", "o"), metric = "Rsquared")
+#		print(p)
+#		##
+
 		collated.importance <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.importance.txt", regi, subtype, mlevel, "multiomics"), header=F, as.is=T, sep="\t", row.names=1, quote="")
 		collated.cv <- read.table(sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.cv.txt", regi, subtype, mlevel, "multiomics"), header=F, as.is=T, sep="\t", row.names=1)
 		importance.mean <- rowMeans(collated.importance)
@@ -1647,8 +1709,10 @@ for (mlevel in "BIOCHEMICAL") {
 		cv.sd <- unlist(apply(collated.cv, 1, sd))
 		inds <- order(importance.mean, decreasing=T)
 #		inds <- inds[1:min(50, length(which(importance.mean[inds] > 0.0005)))] # edit as appropriate
-		inds <- inds[1:min(20, as.numeric(names(cv.mean)[which.min(cv.mean)]))] # select number of features based on cross-validation
-		write.table(melt(importance.mean[inds]), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.features.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=T, col.names=F)
+		inds <- inds[1:min(20, as.numeric(names(cv.mean)[which.min(cv.mean)]))] # minimum CVE, capped at 20 features
+#		inds <- inds[1:as.numeric(names(cv.mean)[which.min(cv.mean)])] # minimum CVE
+#		inds <- inds[1:min(as.numeric(names(which(cv.mean <= min(cv.mean)+sd(cv.mean)))))] # within 1 SD of minimum CVE
+#		write.table(melt(importance.mean[inds]), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.features.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=T, col.names=F)
 
 		## after running for the first time, COMMENT OUT THIS BLOCK ##
 		# using a sparse model with N predictors
@@ -1659,7 +1723,7 @@ for (mlevel in "BIOCHEMICAL") {
 		pred <- predict(sparseRF, type="prob")
 		pred_df <- data.frame(SampleID=rownames(pred), predicted=colnames(pred)[apply(pred, 1, function(x) which.max(x))], true=response[rownames(pred)], stringsAsFactors=F); pred_df$predicted <- factor(pred_df$predicted, levels=levels(pred_df$true))
 		pred_df_out <- merge(pred_df, data.sel, by="row.names")
-		write.table(pred_df_out, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.predictions.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=F, col.names=T)
+#		write.table(pred_df_out, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.predictions.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=F, col.names=T)
 		confusion_matrix <- table(pred_df[, c("true", "predicted")])
 		class_errors <- unlist(lapply(levels(mapping.sel$MaternalGroup), function(x) 1-(confusion_matrix[x,x] / sum(confusion_matrix[x,])) )); names(class_errors) <- levels(mapping.sel$MaternalGroup)
 		accuracy <- 100*(sum(diag(confusion_matrix)) / sum(confusion_matrix))
@@ -1678,7 +1742,7 @@ for (mlevel in "BIOCHEMICAL") {
 		to_store <- data.frame(fpr=perf@x.values[[1]], tpr=perf@y.values[[1]], alpha=perf@alpha.values[[1]], SampleType="multiomics", Regimen=regi, Subtype=subtype, level=mlevel)
 		results.performance <- rbind(results.performance, to_store)
 		
-		write.table(confusion_matrix, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.confusion_matrix.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=T, col.names=T)
+#		write.table(confusion_matrix, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/randomForest_METABOLITE.%s.%s.%s.%s.confusion_matrix.txt", regi, subtype, mlevel, "multiomics"), quote=F, sep="\t", row.names=T, col.names=T)
 		## END BLOCK TO COMMENT ##
 		
 		# plotting - per-group sparse model
@@ -1773,6 +1837,17 @@ for (mlevel in "BIOCHEMICAL") {
 		print(p)
 		p <- ggplot(agg.melt2, aes(x=metabolite, y=value, color=MaternalGroup)) + geom_violin(position=position_dodge(width=0.7)) + geom_point(position=position_dodge(width=0.7), size=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF metabolites (%s, %s, %s)", subtype, mlevel, "multiomics")) + coord_flip() + scale_color_manual(values=cols.cohort)
 		print(p)
+		
+		## examine correlation between creatinine levels and selected features
+		corres <- corr.test(data.sel[, rownames(df)], data.sel[, c("[Plasma] creatinine", "[DBS] creatinine")], method="spearman", adjust="fdr")
+		corres2 <- as.data.frame(melt(corres$r)); corres2$padj <- melt(corres$p.adj)$value
+		corres2$lower <- corres$ci2[, "lower"]; corres2$upper <- corres$ci2[, "upper"]
+		corres2$sig <- ifelse(corres2$padj < siglevel, "sig", "NS")
+		corres2$Var1 <- factor(as.character(corres2$Var1), rev(levels(corres2$Var1)))
+		p <- ggplot(corres2, aes(x=Var1, y=value, color=Var2)) + geom_point(aes(shape=sig), position=pd) + geom_errorbar(aes(x=Var1, ymin=lower, max=upper), width=0.2, position=pd) + geom_hline(yintercept=0) + theme_classic() + ggtitle(sprintf("Creatinine correlation %s - %s %s explanatory %s", regi, subtype, mlevel, "multiomics")) + coord_flip() + ylim(c(-1,1)) + scale_shape_manual(values=shapes.sig)
+		print(p)
+		#####
+		
 	}
 }
 
@@ -1860,7 +1935,6 @@ for (mlevel in "BIOCHEMICAL") {
 		write.table(res, file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/elastic_net.%s.%s.%s.%s.txt", regi, subtype, mlevel, st), quote=F, sep="\t", row.names=F, col.names=T)
 	}
 }
-
 
 
 
@@ -2590,6 +2664,11 @@ write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_2.Infa
 write.table(print(summary(tab1$ContTable)), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_2_detailed.InfantGroup.txt", quote=F, sep="\t", row.names=T, col.names=T)
 tab1 <- CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "Country", "GestationalAgeAtCollection", "delgage", "hemaval.infant", "InfantAgeInDays", "DaysPTDDBS2"), strata=c("Delivery"), data=mapping.demo, smd=T)
 write.table(print(tab1), file="/Lab_Share/PROMISE/nwcs619/metabolon/Table_2.Delivery.txt", quote=F, sep="\t", row.names=T, col.names=T)
+for (regi in c("zdv", "PI-ART")) {
+	tmp <- subset(mapping.demo, InfantRegimen==regi)
+	tmp$Country <- droplevels(tmp$Country)
+	write.table(print(CreateTableOne(vars=c("gender", "weight0week", "weight1week", "ap_onstgage", "GestationalAgeAtCollection", "Country", "delgage", "hemaval.mom", "hemaval.infant", "InfantAgeInDays", "DaysPTDPlasma", "DaysPTDDBS"), strata=c("Delivery"), data=tmp, smd=T)), file=sprintf("/Lab_Share/PROMISE/nwcs619/metabolon/Table_2.InfantRegimen.%s.txt", regi), quote=F, sep="\t", row.names=T, col.names=T)
+}
 
 mapping.demo <- subset(mapping, InfantRegimen %in% c("other", "zdv", "PI-ART"))
 mapping.demo$InfantGroup <- droplevels(mapping.demo$InfantGroup)
