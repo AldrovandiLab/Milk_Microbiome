@@ -695,9 +695,7 @@ for (level in c("Genus", "Species")) {
 
 
 ##################################################################################
-### random forest
-
-## randomForest classification of Transmitter (separately for each time point)
+### random forest (Transmitter, separately for each timepoint)
 psaim <- psaim.relative
 set.seed(nsamples(psaim))
 mvar <- "Transmitter"
@@ -824,6 +822,151 @@ for (level in c("Genus", "Species")) {
 	}
 }
 
+
+##################################################################################
+### random forest (Transmitter, combined over all timepoints)
+psaim <- psaim.relative
+set.seed(nsamples(psaim))
+mvar <- "Transmitter"
+tp <- "Combined"
+res.mean <- list()
+res.sd <- list()
+for (level in c("Genus", "Species")) {
+	psaim.sel <- psaim
+	mapping.sel <- as(sample_data(psaim.sel), "data.frame")
+	tab <- table(mapping.sel[,mvar])
+	wt <- 1-tab/sum(tab)
+	mapping.sel$ipw <- wt[as.character(mapping.sel[,mvar])]
+	
+	otu.filt <- as.data.frame(otu_table(psaim.sel))
+	otu.filt[[level]] <- getTaxonomy(otus=rownames(otu.filt), tax_tab=tax_table(psaim.sel), level=level)
+	# rename Prevotella_6, etc -> Prevotella
+	otu.filt[[level]] <- gsub("_\\d$", "", otu.filt[[level]])
+	otu.filt <- otu.filt[which(otu.filt[[level]]!=""),]
+	agg <- aggregate(as.formula(sprintf(". ~ %s", level)), otu.filt, sum)
+	lvl <- agg[[level]]
+	agg <- agg[,-1]
+	rownames(agg) <- lvl
+	agg <- agg[which(rowSums(agg >= thresholds[["nsamps"]][[level]]) >= ceiling(ncol(agg)*thresholds[["filt"]][[level]])),]
+	
+	sel <- colnames(agg)
+	data.sel <- as.data.frame(t(agg[,sel]))
+	data.sel <- as.matrix(data.sel)
+	response <- droplevels(mapping.sel[sel, mvar]); names(response) <- sel
+	# subset to non-NA
+	response <- subset(response, !is.na(response))
+	data.sel <- data.sel[names(response),]
+	
+	# cast into per-subject data (using mean abundance)
+	data.sel <- as.data.frame(data.sel)
+	data.sel$Patient.ID <- mapping.sel[rownames(data.sel), "Patient.ID"]
+	data.sel$Timepoint <- mapping.sel[rownames(data.sel), "Timepoint"]
+	agg <- aggregate(. ~ Patient.ID + Timepoint, data.sel, mean)
+	agg2 <- melt(agg)
+	agg3 <- dcast(agg2, Patient.ID ~ Timepoint+variable, value.var="value")
+	data.sel <- agg3; rownames(data.sel) <- data.sel$Patient.ID; data.sel <- data.sel[,-1]
+	tmp <- unique(mapping.sel[, c("Patient.ID", "Transmitter")])
+	rownames(tmp) <- tmp$Patient.ID
+	response <- tmp[rownames(data.sel), "Transmitter"]; names(response) <- rownames(tmp)
+	# subset to subjects with data in all three timepoins to avoid NAs
+	sel <- names(which(apply(data.sel, 1, function(x) !any(is.na(x)))))
+	data.sel <- data.sel[sel,]
+	response <- response[sel]	
+	agg.melt.stored <- melt(as.matrix(data.sel), as.is=T); colnames(agg.melt.stored) <- c("Patient.ID", "taxa", "value")
+
+#	## after running for the first time, COMMENT OUT THIS BLOCK ##
+#	num_iter <- 1000
+#	ncores <- 20
+#	ranger.seeds <- sample(1:num_iter, num_iter, replace=T) # set up a vector of seeds for the ranger mclapply
+#	out <- mclapply(1:num_iter, function (dummy) {
+#			importance(ranger(x=data.sel, y=response, num.trees=10000, importance="permutation", case.weights=mapping.sel[rownames(data.sel), "ipw"], seed=ranger.seeds[dummy], num.threads=1))
+#	}, mc.cores=ncores )
+##	out <- mclapply(1:num_iter, function (dummy) {
+##			importance(ranger(x=data.sel, y=response, num.trees=10000, importance="permutation", sample.fraction=c(1, 0.25), seed=ranger.seeds[dummy], num.threads=1))
+##	}, mc.cores=ncores )	
+#	collated.importance <- do.call(cbind, out)
+#	out <- mclapply(1:num_iter, function (dummy) {
+#			rgcv2(trainx=data.sel, trainy=response, cv.fold=10, step=0.9, num.threads=1)$error.cv
+#		}, mc.cores=ncores )
+#	collated.cv <- do.call(cbind, out)
+
+#	write.table(collated.importance, file=sprintf("%s/ranger.%s.%s.%s.%s.importance.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+#	write.table(collated.cv, file=sprintf("%s/ranger.%s.%s.%s.%s.cv.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+#	## END BLOCK TO COMMENT ##
+
+	collated.importance <- read.table(sprintf("%s/ranger.%s.%s.%s.%s.importance.txt", output_dir, aim, mvar, tp, level), header=F, as.is=T, sep="\t", row.names=1, quote="")
+	collated.cv <- read.table(sprintf("%s/ranger.%s.%s.%s.%s.cv.txt", output_dir, aim, mvar, tp, level), header=F, as.is=T, sep="\t", row.names=1)
+	importance.mean <- rowMeans(collated.importance)
+	importance.sd <- unlist(apply(collated.importance, 1, sd))
+	cv.mean <- rowMeans(collated.cv)
+	cv.sd <- unlist(apply(collated.cv, 1, sd))
+	inds <- order(importance.mean, decreasing=T)
+	inds <- inds[1:min(20, as.numeric(names(which.min(cv.mean))))] # edit as appropriate
+	write.table(melt(importance.mean[inds]), file=sprintf("%s/ranger.%s.%s.%s.%s.features.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+
+	## after running for the first time, COMMENT OUT THIS BLOCK ##
+	# using a sparse model with N predictors
+#	sparseRanger <- ranger(x=data.sel[, names(importance.mean[inds]), drop=F], y=response, num.trees=10000, importance="permutation", case.weights=mapping.sel[rownames(data.sel), "ipw"], seed=sample(1:num_iter,1))
+#	save(sparseRanger, file=sprintf("%s/ranger.%s.%s.%s.%s.model", output_dir, aim, mvar, tp, level))
+	load(sprintf("%s/ranger.%s.%s.%s.%s.model", output_dir, aim, mvar, tp, level))
+	# accuracy of final sparseRF model
+	pred <- predictions(sparseRanger)
+	pred_df <- data.frame(SampleID=names(response), predicted=pred, true=response, stringsAsFactors=F); pred_df$predicted <- factor(pred_df$predicted, levels=levels(pred_df$true))
+	pred_df_out <- merge(pred_df, data.sel, by="row.names")
+	write.table(pred_df_out, file=sprintf("%s/ranger.%s.%s.%s.%s.predictions.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=F, col.names=T)
+	confusion_matrix <- table(pred_df[, c("true", "predicted")])
+	class_errors <- unlist(lapply(levels(mapping.sel$sabin_any), function(x) 1-(confusion_matrix[x,x] / sum(confusion_matrix[x,])) )); names(class_errors) <- levels(mapping.sel$sabin_any)
+	accuracy <- 100*(sum(diag(confusion_matrix)) / sum(confusion_matrix))
+	vec.pred <- as.numeric(pred_df$predicted)-1; vec.true <- as.numeric(pred_df$true)-1
+	mccvalue <- mcc(vec.pred, vec.true)
+	df <- cbind(confusion_matrix, class_errors[rownames(confusion_matrix)])
+	p <- qplot(1:10, 1:10, geom = "blank") + theme_bw() + ggtitle(sprintf("confusion matrix (%s, %s, %s) (accuracy = %.2f%%, MCC = %.4f)", aim, mvar, tp, accuracy, mccvalue)) + theme(line = element_blank()) + annotation_custom(grob = tableGrob(df), xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf)
+	print(p)
+
+	write.table(confusion_matrix, file=sprintf("%s/ranger.%s.%s.%s.%s.confusion_matrix.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=T)
+	## END BLOCK TO COMMENT ##
+
+	# plotting - per-group sparse model
+	df <- data.frame(m=cv.mean, sd=cv.sd, numvar=as.numeric(names(cv.mean)))
+	colnames(df) <- c("CV_error", "CV_stddev", "num_variables")
+	print(ggplot(df, aes(x=num_variables, y=CV_error)) + geom_errorbar(aes(ymin=CV_error-CV_stddev, ymax=CV_error+CV_stddev), width=.1) + geom_line() + geom_point() + ggtitle(sprintf("Model selection - %s, %s, %s, %s", aim, mvar, tp, level)))
+	# plotting - per-group variables
+	df <- data.frame(feature=factor(names(importance.mean)[inds], levels=rev(names(importance.mean)[inds])), importance=importance.mean[inds], sd=importance.sd[inds])
+	df$Timepoint <- unlist(lapply(as.character(df$feature), function(x) unlist(strsplit(x, "_"))[1]))
+	df$Taxa <- unlist(lapply(as.character(df$feature), function(x) unlist(strsplit(x, "_"))[2]))
+	# load effect sizes from linear regression
+#	contr <- "Case - Control"
+	lmres <- read.table(sprintf("%s/emmeans.%s.%s.txt", output_dir, aim, level), header=T, as.is=T, sep="\t", quote=""); lmres <- subset(lmres, metadata_variable==mvar); colnames(lmres)[1] <- "Taxa"; lmres$feature <- paste(lmres$Strata, lmres$Taxa, sep="_")
+	df <- merge(lmres[,c("feature", "contrast", "Estimate", "SE", "padj", "dir")], df, by="feature")
+	df <- df[order(df$importance, decreasing=T),]
+	df$feature <- factor(df$feature, levels=rev(df$feature))
+	p <- ggplot(df, aes(x=feature, y=importance, label=feature)) + geom_bar(position=position_dodge(), stat="identity", color=NA) + geom_errorbar(aes(ymin=importance-sd, ymax=importance+sd), width=.2, position=position_dodge(.9)) + coord_flip() + geom_text(aes(x=feature, y=0, label=feature), size=3, hjust=0) + ggtitle(sprintf("%s: %s explanatory %s", aim, mvar, tp)) + theme(axis.text.y=element_blank())
+	print(p)	
+	lims <- max(abs(df$Estimate) + abs(df$SE), na.rm=T)*1.0; pd <- position_dodge(0.8)
+	p <- ggplot(df, aes(x=feature, y=Estimate, color=dir, group=contrast)) + geom_point(position=pd) + geom_errorbar(aes(x=feature, ymin=Estimate-SE, max=Estimate+SE), width=0.2, position=pd) + geom_text(aes(y=-lims, label=contrast), position=pd, hjust=1, color="black", size=1.5) + geom_tile(aes(x=feature, y=-lims*0.95, fill=importance), height=0.1, inherit.aes=F) + geom_hline(yintercept=0) + theme_classic() + ggtitle(sprintf("LM estimates %s %s explanatory %s", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=dircolors) + ylim(c(-lims, lims)) + scale_fill_gradient(low="white", high="black")
+	print(p)	
+	
+	# shading rectangles of importance values
+	df.rect <- df
+	df.rect$x <- 1; df.rect$y <- 1:nrow(df.rect)
+	p <- ggplot(df.rect, aes(x=x, y=feature, fill=importance)) + geom_tile() + theme_classic() + ggtitle(sprintf("%s %s explanatory %s", aim, mvar, tp)) + scale_fill_gradient(low="white", high="black")
+	print(p)
+	# violin plots of relabund values
+	agg.melt <- agg.melt.stored; colnames(agg.melt)[2] <- "feature"
+	agg.melt[,mvar] <- response[agg.melt$Patient.ID]
+	agg.melt <- subset(agg.melt, feature %in% levels(df$feature))
+	agg.melt$feature <- factor(agg.melt$feature, levels=levels(df$feature))
+	p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap(~feature, scales="free", ncol=3) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	print(p)
+	p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap_paginate(~feature, scales="free", ncol=3, nrow=4, page=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	npages <- n_pages(p)
+	for (ip in 1:npages) {
+		p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap_paginate(~feature, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+		print(p)
+	}
+	p <- ggplot(agg.melt, aes_string(x="feature", y="value", color=mvar)) + geom_violin(position=position_dodge(width=0.7)) + geom_point(position=position_dodge(width=0.7), size=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	print(p)
+}
 
 
 
@@ -1692,6 +1835,156 @@ for (level in c("Genus", "Species")) {
 	}
 }
 
+
+##################################################################################
+### random forest (Regimen, combined over all timepoints)
+psaim <- psaim.relative
+set.seed(nsamples(psaim))
+mvar <- "Regimen"
+tp <- "Combined"
+res.mean <- list()
+res.sd <- list()
+for (level in c("Genus", "Species")) {
+	psaim.sel <- psaim
+	mapping.sel <- as(sample_data(psaim.sel), "data.frame")
+	tab <- table(mapping.sel[,mvar])
+	wt <- 1-tab/sum(tab)
+	mapping.sel$ipw <- wt[as.character(mapping.sel[,mvar])]
+	
+	otu.filt <- as.data.frame(otu_table(psaim.sel))
+	otu.filt[[level]] <- getTaxonomy(otus=rownames(otu.filt), tax_tab=tax_table(psaim.sel), level=level)
+	# rename Prevotella_6, etc -> Prevotella
+	otu.filt[[level]] <- gsub("_\\d$", "", otu.filt[[level]])
+	otu.filt <- otu.filt[which(otu.filt[[level]]!=""),]
+	agg <- aggregate(as.formula(sprintf(". ~ %s", level)), otu.filt, sum)
+	lvl <- agg[[level]]
+	agg <- agg[,-1]
+	rownames(agg) <- lvl
+	agg <- agg[which(rowSums(agg >= thresholds[["nsamps"]][[level]]) >= ceiling(ncol(agg)*thresholds[["filt"]][[level]])),]
+	
+	sel <- colnames(agg)
+	data.sel <- as.data.frame(t(agg[,sel]))
+	data.sel <- as.matrix(data.sel)
+	response <- droplevels(mapping.sel[sel, mvar]); names(response) <- sel
+	# subset to non-NA
+	response <- subset(response, !is.na(response))
+	data.sel <- data.sel[names(response),]
+	
+	# cast into per-subject data (using mean abundance)
+	data.sel <- as.data.frame(data.sel)
+	data.sel$Patient.ID <- mapping.sel[rownames(data.sel), "Patient.ID"]
+	data.sel$Visit <- mapping.sel[rownames(data.sel), "Visit"]
+	agg <- aggregate(. ~ Patient.ID + Visit, data.sel, mean)
+	j <- which(!colnames(agg) %in% c("Patient.ID", "Visit"))  # rescale each Patient.ID/Visit combo to Z scores
+	for (i in 1:nrow(agg)) {
+		x <- unlist(agg[i,j])
+		agg[i,j] <- (x - mean(x)) / sd(x)
+	}
+	agg2 <- melt(agg)
+	agg3 <- dcast(agg2, Patient.ID ~ Visit+variable, value.var="value")
+	data.sel <- agg3; rownames(data.sel) <- data.sel$Patient.ID; data.sel <- data.sel[,-1]
+	tmp <- unique(mapping.sel[, c("Patient.ID", "Regimen")])
+	rownames(tmp) <- tmp$Patient.ID
+	response <- tmp[rownames(data.sel), "Regimen"]; names(response) <- rownames(tmp)
+	# subset to subjects with data in all four timepoints to avoid NAs
+	sel <- names(which(apply(data.sel, 1, function(x) !any(is.na(x)))))
+	data.sel <- data.sel[sel,]
+	response <- response[sel]	
+	agg.melt.stored <- melt(as.matrix(data.sel), as.is=T); colnames(agg.melt.stored) <- c("Patient.ID", "taxa", "value")
+
+#	## after running for the first time, COMMENT OUT THIS BLOCK ##
+#	num_iter <- 1000
+#	ncores <- 20
+#	ranger.seeds <- sample(1:num_iter, num_iter, replace=T) # set up a vector of seeds for the ranger mclapply
+#	out <- mclapply(1:num_iter, function (dummy) {
+#			importance(ranger(x=data.sel, y=response, num.trees=10000, importance="permutation", case.weights=mapping.sel[rownames(data.sel), "ipw"], seed=ranger.seeds[dummy], num.threads=1))
+#	}, mc.cores=ncores )
+##	out <- mclapply(1:num_iter, function (dummy) {
+##			importance(ranger(x=data.sel, y=response, num.trees=10000, importance="permutation", seed=ranger.seeds[dummy], num.threads=1))
+##	}, mc.cores=ncores )	
+#	collated.importance <- do.call(cbind, out)
+#	out <- mclapply(1:num_iter, function (dummy) {
+#			rgcv2(trainx=data.sel, trainy=response, cv.fold=10, step=0.9, num.threads=1)$error.cv
+#		}, mc.cores=ncores )
+#	collated.cv <- do.call(cbind, out)
+
+#	write.table(collated.importance, file=sprintf("%s/ranger.%s.%s.%s.%s.importance.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+#	write.table(collated.cv, file=sprintf("%s/ranger.%s.%s.%s.%s.cv.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+#	## END BLOCK TO COMMENT ##
+
+	collated.importance <- read.table(sprintf("%s/ranger.%s.%s.%s.%s.importance.txt", output_dir, aim, mvar, tp, level), header=F, as.is=T, sep="\t", row.names=1, quote="")
+	collated.cv <- read.table(sprintf("%s/ranger.%s.%s.%s.%s.cv.txt", output_dir, aim, mvar, tp, level), header=F, as.is=T, sep="\t", row.names=1)
+	importance.mean <- rowMeans(collated.importance)
+	importance.sd <- unlist(apply(collated.importance, 1, sd))
+	cv.mean <- rowMeans(collated.cv)
+	cv.sd <- unlist(apply(collated.cv, 1, sd))
+	inds <- order(importance.mean, decreasing=T)
+	inds <- inds[1:min(20, as.numeric(names(which.min(cv.mean))))] # edit as appropriate
+	write.table(melt(importance.mean[inds]), file=sprintf("%s/ranger.%s.%s.%s.%s.features.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=F)
+
+	## after running for the first time, COMMENT OUT THIS BLOCK ##
+	# using a sparse model with N predictors
+#	sparseRanger <- ranger(x=data.sel[, names(importance.mean[inds]), drop=F], y=response, num.trees=10000, importance="permutation", case.weights=mapping.sel[rownames(data.sel), "ipw"], seed=sample(1:num_iter,1))
+#	save(sparseRanger, file=sprintf("%s/ranger.%s.%s.%s.%s.model", output_dir, aim, mvar, tp, level))
+	load(sprintf("%s/ranger.%s.%s.%s.%s.model", output_dir, aim, mvar, tp, level))
+	# accuracy of final sparseRF model
+	pred <- predictions(sparseRanger)
+	pred_df <- data.frame(SampleID=names(response), predicted=pred, true=response, stringsAsFactors=F); pred_df$predicted <- factor(pred_df$predicted, levels=levels(pred_df$true))
+	pred_df_out <- merge(pred_df, data.sel, by="row.names")
+	write.table(pred_df_out, file=sprintf("%s/ranger.%s.%s.%s.%s.predictions.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=F, col.names=T)
+	confusion_matrix <- table(pred_df[, c("true", "predicted")])
+	class_errors <- unlist(lapply(levels(mapping.sel$sabin_any), function(x) 1-(confusion_matrix[x,x] / sum(confusion_matrix[x,])) )); names(class_errors) <- levels(mapping.sel$sabin_any)
+	accuracy <- 100*(sum(diag(confusion_matrix)) / sum(confusion_matrix))
+	vec.pred <- as.numeric(pred_df$predicted)-1; vec.true <- as.numeric(pred_df$true)-1
+	mccvalue <- mcc(vec.pred, vec.true)
+	df <- cbind(confusion_matrix, class_errors[rownames(confusion_matrix)])
+	p <- qplot(1:10, 1:10, geom = "blank") + theme_bw() + ggtitle(sprintf("confusion matrix (%s, %s, %s) (accuracy = %.2f%%, MCC = %.4f)", aim, mvar, tp, accuracy, mccvalue)) + theme(line = element_blank()) + annotation_custom(grob = tableGrob(df), xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf)
+	print(p)
+
+	write.table(confusion_matrix, file=sprintf("%s/ranger.%s.%s.%s.%s.confusion_matrix.txt", output_dir, aim, mvar, tp, level), quote=F, sep="\t", row.names=T, col.names=T)
+	## END BLOCK TO COMMENT ##
+
+	# plotting - per-group sparse model
+	df <- data.frame(m=cv.mean, sd=cv.sd, numvar=as.numeric(names(cv.mean)))
+	colnames(df) <- c("CV_error", "CV_stddev", "num_variables")
+	print(ggplot(df, aes(x=num_variables, y=CV_error)) + geom_errorbar(aes(ymin=CV_error-CV_stddev, ymax=CV_error+CV_stddev), width=.1) + geom_line() + geom_point() + ggtitle(sprintf("Model selection - %s, %s, %s, %s", aim, mvar, tp, level)))
+	# plotting - per-group variables
+	df <- data.frame(feature=factor(names(importance.mean)[inds], levels=rev(names(importance.mean)[inds])), importance=importance.mean[inds], sd=importance.sd[inds])
+	df$Timepoint <- unlist(lapply(as.character(df$feature), function(x) unlist(strsplit(x, "_"))[1]))
+	df$Taxa <- unlist(lapply(as.character(df$feature), function(x) unlist(strsplit(x, "_"))[2]))
+	# load effect sizes from linear regression
+#	contr <- "Case - Control"
+	lmres <- read.table(sprintf("%s/emmeans.%s.%s.txt", output_dir, aim, level), header=T, as.is=T, sep="\t", quote=""); lmres <- subset(lmres, metadata_variable==mvar); colnames(lmres)[1] <- "Taxa"; lmres$feature <- paste(lmres$Visit, lmres$Taxa, sep="_")
+	df <- merge(lmres[,c("feature", "contrast", "Estimate", "SE", "padj", "dir")], df, by="feature")
+	df <- df[order(df$importance, decreasing=T),]
+	df$feature <- factor(df$feature, levels=rev(df$feature))
+	p <- ggplot(df, aes(x=feature, y=importance, label=feature)) + geom_bar(position=position_dodge(), stat="identity", color=NA) + geom_errorbar(aes(ymin=importance-sd, ymax=importance+sd), width=.2, position=position_dodge(.9)) + coord_flip() + geom_text(aes(x=feature, y=0, label=feature), size=3, hjust=0) + ggtitle(sprintf("%s: %s explanatory %s", aim, mvar, tp)) + theme(axis.text.y=element_blank())
+	print(p)	
+	lims <- max(abs(df$Estimate) + abs(df$SE), na.rm=T)*1.0; pd <- position_dodge(0.8)
+	p <- ggplot(df, aes(x=feature, y=Estimate, color=dir, group=contrast)) + geom_point(position=pd) + geom_errorbar(aes(x=feature, ymin=Estimate-SE, max=Estimate+SE), width=0.2, position=pd) + geom_text(aes(y=-lims, label=contrast), position=pd, hjust=1, color="black", size=1.5) + geom_tile(aes(x=feature, y=-lims*0.95, fill=importance), height=0.1, inherit.aes=F) + geom_hline(yintercept=0) + theme_classic() + ggtitle(sprintf("LM estimates %s %s explanatory %s", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=dircolors) + ylim(c(-lims, lims)) + scale_fill_gradient(low="white", high="black")
+	print(p)	
+	
+	# shading rectangles of importance values
+	df.rect <- df
+	df.rect$x <- 1; df.rect$y <- 1:nrow(df.rect)
+	p <- ggplot(df.rect, aes(x=x, y=feature, fill=importance)) + geom_tile() + theme_classic() + ggtitle(sprintf("%s %s explanatory %s", aim, mvar, tp)) + scale_fill_gradient(low="white", high="black")
+	print(p)
+	# violin plots of relabund values
+	agg.melt <- agg.melt.stored; colnames(agg.melt)[2] <- "feature"
+	agg.melt[,mvar] <- response[agg.melt$Patient.ID]
+	agg.melt <- subset(agg.melt, feature %in% levels(df$feature))
+	agg.melt$feature <- factor(agg.melt$feature, levels=levels(df$feature))
+	p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap(~feature, scales="free", ncol=3) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	print(p)
+	p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap_paginate(~feature, scales="free", ncol=3, nrow=4, page=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	npages <- n_pages(p)
+	for (ip in 1:npages) {
+		p <- ggplot(agg.melt, aes_string(x=mvar, y="value", color=mvar)) + geom_violin() + geom_point() + facet_wrap_paginate(~feature, scales="free", ncol=3, nrow=4, page=ip) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+		print(p)
+	}
+	p <- ggplot(agg.melt, aes_string(x="feature", y="value", color=mvar)) + geom_violin(position=position_dodge(width=0.7)) + geom_point(position=position_dodge(width=0.7), size=1) + theme_classic() + ggtitle(sprintf("Rel. abund. of RF features (%s, %s, %s)", aim, mvar, tp)) + coord_flip() + scale_color_manual(values=cols.mvar[[mvar]])
+	print(p)
+}
 
 
 
