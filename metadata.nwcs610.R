@@ -28,7 +28,7 @@ mpatids$statdt2 <- as.Date(as.character(mpatids$statdt), format="%d%b%Y")
 mpatids$deldtup2 <- as.Date(as.character(mpatids$deldtup), format="%d%b%Y")
 # add maternal baseline characteristics
 tmp <- read.csv("/Lab_Share/PROMISE/nwcs610/BASELINEANDPREGOUT.csv", row.names=1)
-mpatids <- merge(mpatids, tmp[,1:4], by="row.names"); rownames(mpatids) <- mpatids[,1]; mpatids <- mpatids[, -1]
+mpatids <- merge(mpatids, tmp[,c(1:4,6)], by="row.names"); rownames(mpatids) <- mpatids[,1]; mpatids <- mpatids[, -1]
 data <- mpatids
 # recode some regimens
 data$first_regimen[which(data$first_regimen %in% c("zdv", "zdv,sd.ftc,sd.tdf,sd.nvp", "zdv,ftc,tdf"))] <- "zdv,sd.nvp,ftc,tdf"
@@ -96,6 +96,8 @@ for (i in 1:nrow(metadata)) {
 mapping$deldtup2 <- data[as.character(mapping$Patient.ID), "deldtup2"]
 mapping$country <- data[as.character(mapping$Patient.ID), "country1"]
 mapping$ethnicity <- data[as.character(mapping$Patient.ID), "ethnicity"]
+mapping$delgage <- data[as.character(mapping$Patient.ID), "delgage"]
+mapping$parity <- data[as.character(mapping$Patient.ID), "parity1"]
 
 # set Aim 1 timepoint and grab additional metadata (ZEBS)
 metadata <- read.table("/Lab_Share/ZEBS/matched_1to2.Aim1.010821.with_metadata.txt", header=T, as.is=T, sep="\t")
