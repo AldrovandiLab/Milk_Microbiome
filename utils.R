@@ -5,26 +5,22 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, rows=1) {
   numPlots = length(plots)
 	
 	i = 1
-	while (i < numPlots) {
+	while (i <= numPlots) {
 		numToPlot <- min(numPlots-i+1, cols*rows)
 		# Make the panel
 		# ncol: Number of columns of plots
 		# nrow: Number of rows needed, calculated from # of cols
 		layout <- matrix(seq(i, i+cols*rows-1), ncol = cols, nrow = rows, byrow=T)
-		if (numToPlot==1) {
-		  print(plots[[i]])
-		} else {
-		  # Set up the page
-		  grid.newpage()
-		  pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
-		  # Make each plot, in the correct location
-		  for (j in i:(i+numToPlot-1)) {
-		    # Get the i,j matrix positions of the regions that contain this subplot
-		    matchidx <- as.data.frame(which(layout == j, arr.ind = TRUE))
-		    print(plots[[j]], vp = viewport(layout.pos.row = matchidx$row,
-		                                    layout.pos.col = matchidx$col))
-		  }
-		}
+	  # Set up the page
+	  grid.newpage()
+	  pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+	  # Make each plot, in the correct location
+	  for (j in i:(i+numToPlot-1)) {
+	    # Get the i,j matrix positions of the regions that contain this subplot
+	    matchidx <- as.data.frame(which(layout == j, arr.ind = TRUE))
+	    print(plots[[j]], vp = viewport(layout.pos.row = matchidx$row,
+	                                    layout.pos.col = matchidx$col))
+	  }
 		i <- i+numToPlot
   }
 }
@@ -168,4 +164,18 @@ rgcv2 <- function (trainx, trainy, cv.fold = 10, scale = "log", step = 0.5, mtry
 	list(n.var = n.var, error.cv = error.cv, predicted = cv.pred)
 
 }
+
+
+
+# utility function to do set comparison on two vectors
+setCompare <- function(a, b) {
+	retval <- list()
+	retval[["A not B"]] <- setdiff(a, b)
+	retval[["B not A"]] <- setdiff(b, a)
+	retval[["intersect"]] <- intersect(a, b)
+	return(retval)
+}
+
+
+
 
