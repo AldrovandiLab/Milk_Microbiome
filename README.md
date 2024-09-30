@@ -1,2 +1,2 @@
 # PROMISE
-Private repository for PROMISE-related projects (NWCS619/624, NWCS610)
+Repository for PROMISE-related projects (NWCS619/624, NWCS610)
